@@ -31,9 +31,22 @@ test("builds the latest multi-page Martha Glory prototype", async () => {
       "trauma-x.html",
       "unbound.html",
       "work-with-martha.html",
-    ].map((name) =>
-      readFile(new URL(`../dist/client/${name}`, import.meta.url), "utf8"),
-    ),
+    ].map(async (name) => {
+      const page = await readFile(
+        new URL(`../dist/client/${name}`, import.meta.url),
+        "utf8",
+      );
+      const desktopNavigation = page.match(
+        /<nav class="desktop-nav"[\s\S]*?<\/nav>/,
+      )?.[0];
+
+      assert.ok(desktopNavigation, `${name} includes desktop navigation`);
+      assert.match(
+        desktopNavigation,
+        /href="let-glory-shine\.html"/,
+        `${name} keeps Let Glory Shine in desktop navigation`,
+      );
+    }),
   );
 });
 
