@@ -1,47 +1,73 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
+async function loadWorker() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+  return (await import(workerUrl.href)).default;
 }
 
-test("server-renders the finished Martha Glory site", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+test("builds the latest multi-page Martha Glory prototype", async () => {
+  const index = await readFile(
+    new URL("../dist/client/index.html", import.meta.url),
+    "utf8",
+  );
 
-  const html = await response.text();
-  assert.match(html, /<title>Martha Glory Kartaoui \| Author, Speaker/);
-  assert.match(html, /Your past is part/);
-  assert.match(html, /Work with Martha/);
-  assert.match(html, /UNBOUND/);
-  assert.match(html, /GLORY:/);
-  assert.match(html, /martha@letgloryshine\.com/);
+  assert.match(index, /A connected home for healing/);
+  assert.match(index, /href="trauma-x\.html"/);
+  assert.match(index, /href="unbound\.html"/);
+  assert.match(index, /href="let-glory-shine\.html"/);
+
+  await Promise.all(
+    [
+      "about.html",
+      "book-media.html",
+      "contact.html",
+      "events.html",
+      "let-glory-shine.html",
+      "resources.html",
+      "share-your-story.html",
+      "trauma-x.html",
+      "unbound.html",
+      "work-with-martha.html",
+    ].map((name) =>
+      readFile(new URL(`../dist/client/${name}`, import.meta.url), "utf8"),
+    ),
+  );
 });
 
-test("ships production metadata without the starter preview", async () => {
-  const response = await render();
-  const html = await response.text();
+test("routes the homepage and subpages to the static site", async () => {
+  const worker = await loadWorker();
+  const requestedPaths = [];
+  const env = {
+    ASSETS: {
+      fetch: async (request) => {
+        const pathname = new URL(request.url).pathname;
+        requestedPaths.push(pathname);
+        return new Response(`<h1>${pathname}</h1>`, {
+          headers: { "content-type": "text/html" },
+        });
+      },
+    },
+  };
+  const ctx = {
+    waitUntil() {},
+    passThroughOnException() {},
+  };
 
-  assert.match(html, /property="og:title" content="Martha Glory Kartaoui"/);
-  assert.match(html, /name="twitter:card" content="summary_large_image"/);
-  assert.match(html, /content="http:\/\/localhost:3000\/og\.png"/);
-  assert.doesNotMatch(html, /codex-preview|Building your site|react-loading-skeleton/i);
+  const home = await worker.fetch(
+    new Request("https://example.com/"),
+    env,
+    ctx,
+  );
+  const trauma = await worker.fetch(
+    new Request("https://example.com/trauma-x.html"),
+    env,
+    ctx,
+  );
+
+  assert.equal(home.status, 200);
+  assert.equal(trauma.status, 200);
+  assert.deepEqual(requestedPaths, ["/index.html", "/trauma-x.html"]);
 });
